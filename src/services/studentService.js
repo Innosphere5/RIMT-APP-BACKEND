@@ -5,6 +5,7 @@
 const { supabaseAdmin } = require('../config/supabase');
 const { normalizeRollNo } = require('../utils/validators');
 const { normalizeStudentRecord, parseJsonField } = require('../utils/helpers');
+const CacheService = require('./cacheService');
 
 /**
  * Fetch student profile by roll number.
@@ -13,20 +14,26 @@ async function fetchStudentProfile(rollNo) {
   const normalizedRoll = normalizeRollNo(rollNo);
   if (!normalizedRoll) return null;
 
-  const { data, error } = await supabaseAdmin
-    .from('students')
-    .select('*')
-    .ilike('roll_no', normalizedRoll)
-    .maybeSingle();
+  return await CacheService.getOrSet(
+    `student:profile:${normalizedRoll}`,
+    async () => {
+      const { data, error } = await supabaseAdmin
+        .from('students')
+        .select('*')
+        .ilike('roll_no', normalizedRoll)
+        .maybeSingle();
 
-  if (error) {
-    console.warn('[studentService] fetchStudentProfile error:', error.message);
-    return null;
-  }
+      if (error) {
+        console.warn('[studentService] fetchStudentProfile error:', error.message);
+        return null;
+      }
 
-  if (!data) return null;
+      if (!data) return null;
 
-  return normalizeStudentRecord(data);
+      return normalizeStudentRecord(data);
+    },
+    3600 // 1 hour TTL
+  );
 }
 
 /**
@@ -146,6 +153,14 @@ async function updateStudentProfile({
     cloudStudent.semester_scores = parseJsonField(cloudStudent.semester_scores, []);
     if (certificates !== undefined) cloudStudent.certificates = certificates;
     if (internships !== undefined) cloudStudent.internships = internships;
+
+    // Invalidate cached profile & dossier
+    await CacheService.invalidate(
+      `student:profile:${normalizedRoll}`,
+      `student:full:${normalizedRoll}`,
+      `student:status:${normalizedRoll}`,
+      cloudStudent.id ? `student:id:${cloudStudent.id}` : null
+    );
   }
 
   return {
