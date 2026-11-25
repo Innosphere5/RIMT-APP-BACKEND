@@ -7,6 +7,7 @@ const { supabaseAdmin } = require('../config/supabase');
 const { normalizeRollNo } = require('../utils/validators');
 const { normalizeStudentRecord, parseJsonField } = require('../utils/helpers');
 const { generateToken } = require('../utils/jwt');
+const CacheService = require('./cacheService');
 
 /**
  * Sign Up Student — Creates a PENDING record in Supabase.
@@ -229,6 +230,11 @@ async function getFullStudentData(studentPartial) {
   const rollNo = normalizeRollNo(studentPartial?.roll_no || studentPartial?.roll_number);
 
   if (!studentId && !rollNo) return studentPartial || null;
+  const cacheKey = `student:full:${studentId || rollNo}`;
+
+  return await CacheService.getOrSet(
+    cacheKey,
+    async () => {
 
   // 1. Fetch base student record
   let baseStudent = studentPartial;
@@ -297,6 +303,9 @@ async function getFullStudentData(studentPartial) {
   normalized.semester_records = semesterRecords;
 
   return normalized;
+    },
+    1800 // 30 minutes TTL
+  );
 }
 
 /**
